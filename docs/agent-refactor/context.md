@@ -103,7 +103,9 @@ This prevents wasted (and billed) LLM calls that would otherwise fail with a con
 
 `forceCompression` runs when the LLM returns a context-window error despite the proactive check.
 
-Drops the oldest ~50% of Turns. Stores a compression note in the session summary (not in history messages) so `BuildMessages` can include it in the next system prompt.
+Drops the oldest ~50% of Turns. If the history is a single Turn with no safe split point (e.g. one user message followed by a massive tool response), falls back to keeping only the most recent user message — breaking Turn atomicity as a last resort to avoid a context-exceeded loop.
+
+Stores a compression note in the session summary (not in history messages) so `BuildMessages` can include it in the next system prompt.
 
 This is the fallback for when the token estimate undershoots reality.
 
