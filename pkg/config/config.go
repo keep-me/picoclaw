@@ -822,6 +822,7 @@ type ToolsConfig struct {
 	Subagent        ToolConfig         `json:"subagent"          yaml:"-"                                                       envPrefix:"PICOCLAW_TOOLS_SUBAGENT_"`
 	WebFetch        ToolConfig         `json:"web_fetch"         yaml:"-"                                                       envPrefix:"PICOCLAW_TOOLS_WEB_FETCH_"`
 	WriteFile       ToolConfig         `json:"write_file"        yaml:"-"                                                       envPrefix:"PICOCLAW_TOOLS_WRITE_FILE_"`
+	DiffFiles       ToolConfig         `json:"diff_files"        yaml:"-"                                                       envPrefix:"PICOCLAW_TOOLS_DIFF_FILES_"`
 }
 
 // IsFilterSensitiveDataEnabled returns true if sensitive data filtering is enabled
@@ -1509,6 +1510,8 @@ func (t *ToolsConfig) IsToolEnabled(name string) bool {
 		return t.WriteFile.Enabled
 	case "mcp":
 		return t.MCP.Enabled
+	case "diff_files":
+		return t.DiffFiles.Enabled
 	default:
 		return true
 	}

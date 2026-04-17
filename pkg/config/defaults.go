@@ -423,6 +423,9 @@ func DefaultConfig() *Config {
 			WriteFile: ToolConfig{
 				Enabled: true,
 			},
+			DiffFiles: ToolConfig{
+				Enabled: true,
+			},
 		},
 		Heartbeat: HeartbeatConfig{
 			Enabled:  true,
