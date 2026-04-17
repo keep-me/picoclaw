@@ -5,20 +5,25 @@ import (
 	"bytes"
 	"context"
 	"fmt"
+	"math"
+	"os"
 	"path/filepath"
 	"regexp"
 	"strings"
 
 	"github.com/pmezard/go-difflib/difflib"
+	fstools "github.com/sipeed/picoclaw/pkg/tools/fs"
 )
 
 const (
-	DiffFormatUnified = "unified"
-	DiffFormatSideBySide = "side_by_side"
+	DiffFormatUnified     = "unified"
+	DiffFormatSideBySide  = "side_by_side"
 )
 
 type DiffTool struct {
-	fs              fileSystem
+	workspace       string
+	restrict        bool
+	allowPaths      []*regexp.Regexp
 	maxReadFileSize int64
 }
 
@@ -35,11 +40,13 @@ func NewDiffTool(
 
 	maxSize := int64(maxReadFileSize)
 	if maxSize <= 0 {
-		maxSize = MaxReadFileSize
+		maxSize = fstools.MaxReadFileSize
 	}
 
 	return &DiffTool{
-		fs:              buildFs(workspace, restrict, patterns),
+		workspace:       workspace,
+		restrict:        restrict,
+		allowPaths:      patterns,
 		maxReadFileSize: maxSize,
 	}
 }
@@ -85,15 +92,40 @@ func (t *DiffTool) Parameters() map[string]any {
 	}
 }
 
-func (t *DiffTool) Execute(ctx context.Context, args map[string]any) *ToolResult {
+func getInt64Arg(args map[string]any, key string, defaultVal int64) (int64, error) {
+	raw, exists := args[key]
+	if !exists {
+		return defaultVal, nil
+	}
+
+	switch v := raw.(type) {
+	case float64:
+		if v != math.Trunc(v) {
+			return 0, fmt.Errorf("%s must be an integer, got float %v", key, v)
+		}
+		return int64(v), nil
+	case int:
+		return int64(v), nil
+	case int64:
+		return v, nil
+	case uint:
+		return int64(v), nil
+	case uint64:
+		return int64(v), nil
+	default:
+		return 0, fmt.Errorf("%s must be an integer, got %T", key, v)
+	}
+}
+
+func (t *DiffTool) Execute(ctx context.Context, args map[string]any) *fstools.ToolResult {
 	fileA, ok := args["file_a"].(string)
 	if !ok {
-		return ErrorResult("file_a is required")
+		return fstools.ErrorResult("file_a is required")
 	}
 
 	fileB, ok := args["file_b"].(string)
 	if !ok {
-		return ErrorResult("file_b is required")
+		return fstools.ErrorResult("file_b is required")
 	}
 
 	format := DiffFormatUnified
@@ -120,7 +152,7 @@ func (t *DiffTool) Execute(ctx context.Context, args map[string]any) *ToolResult
 		var err error
 		contextLines, err = getInt64Arg(args, "context_lines", 3)
 		if err != nil {
-			return ErrorResult(err.Error())
+			return fstools.ErrorResult(err.Error())
 		}
 		if contextLines < 0 {
 			contextLines = 0
@@ -129,12 +161,12 @@ func (t *DiffTool) Execute(ctx context.Context, args map[string]any) *ToolResult
 
 	contentA, err := t.readFile(fileA)
 	if err != nil {
-		return ErrorResult(fmt.Sprintf("failed to read file_a: %v", err))
+		return fstools.ErrorResult(fmt.Sprintf("failed to read file_a: %v", err))
 	}
 
 	contentB, err := t.readFile(fileB)
 	if err != nil {
-		return ErrorResult(fmt.Sprintf("failed to read file_b: %v", err))
+		return fstools.ErrorResult(fmt.Sprintf("failed to read file_b: %v", err))
 	}
 
 	linesA := strings.SplitAfter(contentA, "\n")
@@ -159,24 +191,36 @@ func (t *DiffTool) Execute(ctx context.Context, args map[string]any) *ToolResult
 	default:
 		result, err = t.formatUnifiedDiff(linesA, linesB, fileA, fileB, int(contextLines))
 		if err != nil {
-			return ErrorResult(fmt.Sprintf("failed to generate diff: %v", err))
+			return fstools.ErrorResult(fmt.Sprintf("failed to generate diff: %v", err))
 		}
 	}
 
-	return NewToolResult(result)
+	return fstools.NewToolResult(result)
+}
+
+func (t *DiffTool) validatePath(path string) (string, error) {
+	return fstools.ValidatePathWithAllowPaths(path, t.workspace, t.restrict, t.allowPaths)
 }
 
 func (t *DiffTool) readFile(path string) (string, error) {
-	file, err := t.fs.Open(path)
+	validatedPath, err := t.validatePath(path)
+	if err != nil {
+		return "", err
+	}
+
+	file, err := os.Open(validatedPath)
 	if err != nil {
 		return "", err
 	}
 	defer file.Close()
 
-	if info, statErr := file.Stat(); statErr == nil {
-		if info.Size() > t.maxReadFileSize {
-			return "", fmt.Errorf("file too large (max %d bytes)", t.maxReadFileSize)
-		}
+	info, err := file.Stat()
+	if err != nil {
+		return "", err
+	}
+
+	if info.Size() > t.maxReadFileSize {
+		return "", fmt.Errorf("file too large (max %d bytes)", t.maxReadFileSize)
 	}
 
 	var buf bytes.Buffer
